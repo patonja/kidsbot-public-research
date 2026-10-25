@@ -1,0 +1,29 @@
+name: KIDSBOT V5 Public Research
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  source-backtest:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: No-code-execution selftest
+        run: python3 research/run_batch.py --selftest
+      - name: Freqtrade isolated public research (NO exchange credentials)
+        env:
+          KIDSBOT_RESEARCH_NO_SECRETS: 'YES'
+        run: python3 -u research/run_batch.py
+      - name: Upload screening report and sanitized logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kidsbot-v5-screening
+          path: |
+            research_output/results/summary.json
+            research_output/staging/*/backtest.log
+          if-no-files-found: warn
+          retention-days: 14
