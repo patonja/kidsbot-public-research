@@ -276,8 +276,14 @@ def main():
          'ONLY_DISPOSABLE_GITHUB_ACTIONS_RUNNER_ALLOWED')
     need(os.environ.get('KIDSBOT_RESEARCH_NO_SECRETS')=='YES',
          'NO_SECRETS_GUARD_MISSING')
-    need(not Path('/root/kidsbot_ena_oco_reconciler_v1.py').exists(),
-         'LIVE_MACHINE_NOT_ALLOWED')
+    need(os.environ.get('RUNNER_ENVIRONMENT') == 'github-hosted' and
+         os.environ.get('RUNNER_OS') == 'Linux' and os.geteuid() != 0,
+         'ONLY_UNPRIVILEGED_GITHUB_HOSTED_LINUX_RUNNER_ALLOWED')
+    try:
+        live_file = Path('/root/kidsbot_ena_oco_reconciler_v1.py').exists()
+    except PermissionError:
+        live_file = False
+    need(not live_file, 'LIVE_MACHINE_NOT_ALLOWED')
     RESULTS.mkdir(parents=True,exist_ok=True)
     report={'type':'KIDSBOT_V5_PUBLIC_HISTORICAL_DISCOVERY_SCREEN_ONLY',
             'source_repository':REPO,'commit':COMMIT,'period':PERIOD,
