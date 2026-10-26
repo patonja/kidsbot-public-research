@@ -1,0 +1,29 @@
+name: KIDSBOT V6 Offline Source Signal Screening
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  source-signal-proxy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 85
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Static selftest (no network/no trading)
+        run: |
+          python3 research/run_offline.py --selftest
+          python3 -m py_compile research/offline_worker.py research/run_offline.py
+      - name: Isolated no-network Freqtrade-source signal proxy
+        env:
+          KIDSBOT_RESEARCH_NO_SECRETS: 'YES'
+        run: python3 -u research/run_offline.py
+      - name: Publish truthful reports even after failed steps
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kidsbot-v6-offline-report
+          path: offline_output/results/summary.json
+          if-no-files-found: warn
+          retention-days: 14
