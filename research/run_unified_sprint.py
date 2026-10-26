@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """KIDSBOT: extend EXISTING V5/V6/V7 research, never trading or LIVE promotion.
 
-Deterministic 48h batches of NOT-YET-TESTED source classes from the locked
-V5 source commit. V2 AST filters are reused unchanged. Raw source runs only
+Deterministic 48h batches of NOT-YET-TESTED source classes from locked
+V5 + two additional V2 already-cataloged public GitHub commit snapshots. V2 AST filters are reused unchanged. Raw source runs only
 in existing-style no-network, read-only, unprivileged Docker with no secrets.
 Reports are source-signal PROXIES (not Freqtrade-equivalent or causal proof).
 """
@@ -32,6 +32,7 @@ TESTED = frozenset({
     'ADXMomentum','AdxSmas','AwesomeMacd','BbandRsi',
     'Freqtrade_backtest_validation_freqtrade1','HourBasedStrategy','Supertrend',
     'AverageStrategy','ReinforcedAverageStrategy','mabStra','Heracles',
+    'MultiMa',  # 2026-10-26 Unified slot-0: 171 trades, -81.5063bps avg NET proxy
 })
 REJECT_FLAGS = frozenset({
     'COMPLEX_RUNTIME_CALLBACKS','POSITION_ADJUSTMENT_CAPITAL_REQUIREMENTS',
@@ -84,44 +85,97 @@ def eligible(row: dict) -> bool:
         and isinstance(row.get('source_file_sha256'),str))
 
 
-def discover_pinned() -> list[dict]:
-    """Read only locked V5 snapshot; exactly one source per unique class & AST."""
-    need(v5.REPO=='freqtrade/freqtrade-strategies' and
-         v5.COMMIT=='f3340ce11f5bdf62f598522e64d1f5638eaa13f5',
-         'PINNED_V5_SOURCE_CHANGED_STOP')
-    raw = v5.get_bytes(f'https://codeload.github.com/{v5.REPO}/zip/{v5.COMMIT}',
-                       v5.LIMIT_ZIP_REPO)
-    found=[]
-    with zipfile.ZipFile(io.BytesIO(raw)) as z:
-        need(len(z.infolist())<=8000, 'TOO_MANY_ARCHIVE_MEMBERS')
-        for item in z.infolist():
-            rel=item.filename.partition('/')[2]
-            if (not rel.startswith('user_data/strategies/') or not rel.endswith('.py')
-                or item.file_size>MAX_SOURCE_BYTES or item.file_size<100
-                or any(x in '/'+rel.lower() for x in
-                    ('/lookahead','/futures/','/archived/','/tests/'))):
-                continue
-            try:
-                src=z.read(item).decode('utf-8-sig')
-            except (UnicodeError,ValueError,RuntimeError,zipfile.BadZipFile):
-                continue
-            candidates, error = strategy_objects(src, v5.REPO, v5.COMMIT, rel)
-            if error:
-                continue
-            for row in candidates:
-                if eligible(row):
-                    found.append({**row, '_source':src})
-    # Reject ambiguous class names and fingerprint duplicates, not arbitrarily pick one.
+def verified_source_manifest() -> list[dict]:
+    """Frozen exact public SHA snapshots generated at deploy, never moving HEAD.
+
+    Do not import or execute from these repositories on the host. The locked V5
+    pinned base is always first. Fail closed if the set or pin is unexpected.
+    """
+    manifest_path = Path(__file__).resolve().parent / 'unified_source_snapshots.json'
+    doc = json.loads(manifest_path.read_text(encoding='utf-8'))
+    need(doc.get('schema') == 'KIDSBOT_PINNED_PUBLIC_V2_EXTRA_SOURCES_V1',
+         'BAD_PINNED_SOURCE_SCHEMA')
+    rows = doc.get('sources')
+    expected_repos = (
+        'freqtrade/freqtrade-strategies',
+        'werkkrew/freqtrade-strategies',
+        'iterativv/NostalgiaForInfinity',
+    )
+    need(isinstance(rows, list) and len(rows)==len(expected_repos),
+         'UNEXPECTED_SOURCE_COUNT')
+    for row, expected in zip(rows, expected_repos):
+        need(isinstance(row, dict) and row.get('repo') == expected and
+             isinstance(row.get('commit'), str) and
+             re.fullmatch('[a-f0-9]{40}', row['commit']) is not None,
+             'UNPINNED_OR_UNEXPECTED_SOURCE')
+    need(rows[0]['commit'] == v5.COMMIT and v5.REPO == expected_repos[0] and
+         v5.COMMIT == 'f3340ce11f5bdf62f598522e64d1f5638eaa13f5',
+         'LOCKED_V5_SOURCE_CHANGED_STOP')
+    return rows
+
+
+def discover_pinned() -> tuple[list[dict], list[dict]]:
+    """V2 parser across 3 commit-pinned repositories; never import raw code.
+
+    Only parse strategy source files in memory, bounded for zip members and
+    decompressed bytes. No source zip extraction, write or execution on host.
+    Reject duplicates rather than silently selecting arbitrary versions.
+    """
+    found = []
+    provenance = []
+    for item in verified_source_manifest():
+        repo, commit = item['repo'], item['commit']
+        raw = v5.get_bytes(f'https://codeload.github.com/{repo}/zip/{commit}',
+                           v5.LIMIT_ZIP_REPO)
+        parsed, read_files = 0, 0
+        cumulative = 0
+        with zipfile.ZipFile(io.BytesIO(raw)) as z:
+            need(len(z.infolist()) <= 8000, 'TOO_MANY_ARCHIVE_MEMBERS')
+            for member in z.infolist():
+                # Preserve the original V5 restrictions; allow V2's known
+                # multi-repo strategy layouts without executing code.
+                rel=member.filename.partition('/')[2]
+                valid = (rel.startswith('user_data/strategies/') or
+                         rel.startswith('strategies/') or
+                         'NostalgiaForInfinity' in rel)
+                if (not valid or not rel.endswith('.py') or
+                    member.file_size > MAX_SOURCE_BYTES or
+                    member.file_size < 100 or
+                    any(x in '/'+rel.lower() for x in
+                        ('/lookahead','/futures/','/archived/','/tests/'))):
+                    continue
+                need(read_files < 1000, 'MAX_SOURCE_FILES_EXCEEDED')
+                cumulative += member.file_size
+                need(cumulative <= 24 * 1024 * 1024,
+                     'MAX_DECOMPRESSED_STRATEGY_BYTES')
+                read_files += 1
+                try:
+                    src=z.read(member).decode('utf-8-sig')
+                except (UnicodeError,ValueError,RuntimeError,zipfile.BadZipFile):
+                    continue
+                rows, error = strategy_objects(src, repo, commit, rel)
+                if error:
+                    continue
+                parsed += len(rows)
+                for row in rows:
+                    if eligible(row):
+                        found.append({**row, '_source':src})
+        provenance.append({'repository':repo, 'commit':commit,
+                           'archive_sha256':hashlib.sha256(raw).hexdigest(),
+                           'python_files_read':read_files,
+                           'classes_parsed':parsed})
     counts={}
     fps={}
     for row in found:
-        k=row['strategy']; f=row['behavior_fingerprint']
-        counts[k]=counts.get(k,0)+1
-        fps[f]=fps.get(f,0)+1
-    unique=[r for r in found if counts[r['strategy']]==1 and fps[r['behavior_fingerprint']]==1]
+        name=row['strategy']; fp=row['behavior_fingerprint']
+        counts[name]=counts.get(name,0)+1
+        fps[fp]=fps.get(fp,0)+1
+    unique=[r for r in found if counts[r['strategy']]==1 and
+            fps[r['behavior_fingerprint']]==1]
     unique.sort(key=lambda r:(-r['research_priority_score_not_pnl'],
-                              len(r['review_flags']),r['behavior_fingerprint'],r['strategy']))
-    return unique
+                              len(r['review_flags']),r['behavior_fingerprint'],
+                              r['strategy'], r['source_repository']))
+    return unique, provenance
 
 
 def configure_timeframe(tf: str) -> None:
@@ -185,6 +239,7 @@ def selftest() -> None:
          'behavior_fingerprint':'abcdef', 'source_file_sha256':'f'*64}
     need(eligible(row),'ELIGIBLE_FIXTURE_REJECTED')
     need(not eligible({**row,'strategy':'AverageStrategy'}),'V8_REJECTED_CANDIDATE_SELECTED')
+    need(not eligible({**row,'strategy':'MultiMa'}),'OCT26_NEGATIVE_RESELECTED')
     need(not eligible({**row,'strategy':'../evil'}),'PATH_TRAVERSAL_ACCEPTED')
     need(not eligible({**row,'review_flags':['COMPLEX_RUNTIME_CALLBACKS']}),'CALLBACK_ACCEPTED')
     need(not eligible({**row,'can_short':True}),'SHORT_ACCEPTED')
@@ -196,6 +251,7 @@ def selftest() -> None:
          'CONTAINER_GUARD_MISSING')
     need(all(p.is_file() for p in WORKERS.values()),'WORKER_FILE_MISSING')
     need((Path(__file__).parent/'run_batch.py').is_file(), 'V5_INGEST_MISSING')
+    verified_source_manifest()
     print('SELFTEST_PASS_V2_AST_V5_DATA_V6_V7_ISOLATED_PROXY_NO_TRADES')
 
 
@@ -237,11 +293,12 @@ def main() -> None:
              'DOCKER_UNAVAILABLE')
         for worker in WORKERS.values():
             compile(worker.read_text(),str(worker),'exec')  # compile only; never import raw strategies
-        all_eligible=discover_pinned()
+        all_eligible, provenance=discover_pinned()
+        report['source_snapshots']=provenance
         report['eligible_untested_total']=len(all_eligible)
         selected=all_eligible[slot*MAX_PER_SLOT:(slot+1)*MAX_PER_SLOT]
         report['selected']=[{k:r[k] for k in
-            ('strategy','timeframe','behavior_fingerprint','source_file','source_file_sha256')}
+            ('strategy','timeframe','behavior_fingerprint','source_repository','source_commit_sha','source_file','source_file_sha256')}
             for r in selected]
         persist(report)
         if not selected:

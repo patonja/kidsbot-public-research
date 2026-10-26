@@ -1,0 +1,17 @@
+{
+  "schema": "KIDSBOT_PINNED_PUBLIC_V2_EXTRA_SOURCES_V1",
+  "sources": [
+    {
+      "repo": "freqtrade/freqtrade-strategies",
+      "commit": "f3340ce11f5bdf62f598522e64d1f5638eaa13f5"
+    },
+    {
+      "repo": "werkkrew/freqtrade-strategies",
+      "commit": "582e9649a88623b6f85f03a63bfa68410cd8ad8a"
+    },
+    {
+      "repo": "iterativv/NostalgiaForInfinity",
+      "commit": "0aca052cb33bf7ba2328064cc006ef3d4fd801b7"
+    }
+  ]
+}
