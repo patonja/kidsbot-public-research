@@ -1,0 +1,29 @@
+name: KIDSBOT V7 New 4h Source Research
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  v7-offline-4h:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 85
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Local syntax and orchestration safety checks
+        run: |
+          python3 -m py_compile research/run_v7.py research/offline_worker_v7.py
+          python3 research/run_v7.py --selftest
+      - name: Public-source isolated 4h research proxy
+        env:
+          KIDSBOT_RESEARCH_NO_SECRETS: 'YES'
+        run: python3 -u research/run_v7.py
+      - name: Upload truthful report on success or failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kidsbot-v7-4h-report
+          path: v7_output/summary.json
+          if-no-files-found: warn
+          retention-days: 14
