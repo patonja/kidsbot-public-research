@@ -167,6 +167,23 @@ def research_config(p):
        'exchange':{'name':'binance','key':'','secret':'',
                    'pair_whitelist':[x[:-4]+'/USDC' for x in PAIRS], 'pair_blacklist':[]},
        'pairlists':[{'method':'StaticPairList'}], 'timeframe':TIMEFRAME,
+       'entry_pricing':{
+           'price_side':'same',
+           'use_order_book':True,
+           'order_book_top':1,
+           'price_last_balance':0.0
+       },
+       'exit_pricing':{
+           'price_side':'same',
+           'use_order_book':True,
+           'order_book_top':1,
+           'price_last_balance':0.0
+       },
+       'unfilledtimeout':{
+           'entry':10,
+           'exit':10,
+           'unit':'minutes'
+       },
        'dataformat_ohlcv':'json','fiat_display_currency':'USD',
        'bot_name':'PUBLIC-HISTORICAL-RESEARCH-NO-TRADING',
     }
@@ -317,6 +334,12 @@ def main():
         report['status']='FAIL_CLOSED'
         report['error']=type(e).__name__+': '+str(e)[:200]
         print('FAIL_CLOSED:',report['error'],file=sys.stderr,flush=True)
+    if report.get('status') != 'FAIL_CLOSED' and (
+        len(report['results']) != len(STRATEGIES) or
+        any(v.get('status') != 'HISTORICAL_PROXY_SCREEN'
+            for v in report['results'].values())
+    ):
+        report['status'] = 'INCOMPLETE_STRATEGY_BACKTESTS'
     atomic_json(RESULTS/'summary.json',report)
     print('=== V5 FINAL ===',flush=True)
     print('ENGINE_ATTEMPTS:',sum(v.get('status','').startswith('HISTORICAL') or v.get('status','').startswith('ENGINE') for v in report['results'].values()),flush=True)
@@ -324,7 +347,8 @@ def main():
     print('STATUS:',report['status'],flush=True)
     print('REPORT: research_output/results/summary.json',flush=True)
     print('NEVER LIVE AUTHORIZED / NO AUTH API / NO ORDERS',flush=True)
-    need(report['status']!='FAIL_CLOSED',report.get('error','RUN_FAILED'))
+    need(report['status']=='SCREENING_COMPLETED_WITH_PER_STRATEGY_STATUS',
+         report.get('status','RUN_FAILED'))
 
 
 if __name__=='__main__':
