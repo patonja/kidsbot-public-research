@@ -1,0 +1,29 @@
+name: KIDSBOT V8 Locked Q4 Validation (Historical Proxy)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  v8-locked-q4:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 85
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Static tests and locked scope
+        run: |
+          python3 -m py_compile research/run_v8_holdout.py research/offline_worker_v8.py
+          python3 research/run_v8_holdout.py --selftest
+      - name: Isolated source-signal historical validation
+        env:
+          KIDSBOT_RESEARCH_NO_SECRETS: 'YES'
+        run: python3 -u research/run_v8_holdout.py
+      - name: Always upload honest report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kidsbot-v8-locked-q4-report
+          path: v8_output/summary.json
+          if-no-files-found: warn
+          retention-days: 14
