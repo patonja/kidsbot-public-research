@@ -1,0 +1,36 @@
+name: KIDSBOT Unified Existing V2-V8 Research Sprint
+on:
+  workflow_dispatch:
+  # Exactly the remaining two calendar days of the Oct 26-28 2026 sprint.
+  # The Python process ALSO refuses work outside its locked 48h window.
+  schedule:
+    - cron: '13 2,8,14,20 27,28 10 *'
+permissions:
+  contents: read
+concurrency:
+  group: kidsbot-existing-unified-research-sprint
+  cancel-in-progress: false
+jobs:
+  discovery-to-isolated-proxy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Selftest locked boundaries, provenance and no-LIVE isolation
+        run: |
+          python3 -m py_compile research/kidsbot_universal_discovery_v2.py research/run_unified_sprint.py research/unified_worker_1h.py research/unified_worker_4h.py research/run_batch.py
+          python3 research/run_unified_sprint.py --selftest
+      - name: Reuse V2 AST and V5 historical archives and V6/V7 research proxy
+        env:
+          KIDSBOT_RESEARCH_NO_SECRETS: 'YES'
+        run: python3 -u research/run_unified_sprint.py
+      - name: Retain truthful research status even on failures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kidsbot-unified-research-report
+          path: unified_output/summary.json
+          if-no-files-found: warn
+          retention-days: 14
